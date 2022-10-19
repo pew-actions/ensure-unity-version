@@ -1,0 +1,70 @@
+name: 'PlayEveryWare/action-ensure-unity-version'
+description: 'Ensures an images for the specified version of Unity exists'
+inputs:
+  unity-version:
+    description: Version of unity needed (2021.2.9f1)
+    required: true
+  package-name:
+    description: Package name
+    required: true
+    default: ghcr.io/playeveryware/unity
+  token:
+    description: Access token that has write access to the unity package
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - uses: PlayEveryWare/action-get-unity-changeset@v1
+      id: unity-changeset
+      with:
+        unity-version: ${{ inputs.unity-version }}
+
+    - uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.token }}
+
+    # NOTE(mendsley): Application installation access tokens can't really
+    # interact with the packages API for some reason T__T. Simply try pulling
+    # the image to check if it exists
+    - name: Build image if needed
+      id: need-image
+      shell: powershell
+      run: |
+        echo "Looking for package: ${{ inputs.package-name}}:${{ inputs.unity-version }}"
+        $job = Start-Job {
+          docker pull ${{ inputs.package-name }}:${{ inputs.unity-version }}
+          if ( $LastExitCode  -ne 0 ) {
+            throw "Failed to pull image"
+          }
+        }
+
+        try {
+          $job | Wait-Job | Receive-Job
+        } catch {
+          echo "result=true" >> $ENV:GITHUB_OUTPUT
+        }
+
+    - uses: PlayEveryWare/checkout@v1
+      if: '${{ steps.need-image.outputs.result }}'
+      with:
+        repository: PlayEveryWare/pew-docker
+        path: .pew-builder/pew-docker
+
+    - name: Build Unity ${{ inputs.unity-version }} (${{ steps.unity-changeset.outputs.changeset }}) image
+      if: '${{ steps.need-image.outputs.result }}'
+      shell: powershell
+      run: |
+        docker build `
+          --build-arg UNITY_VERSION=${{ inputs.unity-version }} `
+          --build-arg UNITY_CHANGESET=${{ steps.unity-changeset.outputs.changeset }} `
+          -t ${{ inputs.package-name }}:${{ inputs.unity-version }} `
+          .\.pew-builder\pew-docker\unity
+
+    - name: Push Unity image to container registry
+      if: '${{ steps.need-image.outputs.result }}'
+      shell: powershell
+      run: |
+        docker push ${{ inputs.package-name }}:${{ inputs.unity-version }} `
