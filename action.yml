@@ -15,7 +15,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: PlayEveryWare/action-get-unity-changeset@v1
+    - uses: pew-actions/get-unity-changeset@v1.2
       id: unity-changeset
       with:
         unity-version: ${{ inputs.unity-version }}
